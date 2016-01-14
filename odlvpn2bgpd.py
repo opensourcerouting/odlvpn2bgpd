@@ -40,6 +40,7 @@ class BGPConfImpl(object):
         self.proc = None
         self.quaggacfg = quaggacfg
         self.bgpdpath = bgpdpath
+        self.rd_cache = {}
 
     def startBgp(self, asn, rid, port, t_holdtime, t_keepalive, t_stalepath, fbit):
         if self.asn is not None:
@@ -170,10 +171,13 @@ class BGPConfImpl(object):
         return 0
 
     def find_vrf(self, rd):
+        if rd in self.rd_cache:
+            return self.rd_cache[rd]
         vrfs = self.zsock.getelem(self.bgp_instance_nid, 3)
         for vrf in vrfs.nodes:
             data = self.zsock.getelem(vrf, 1)
             if data.outboundRd == rd:
+                self.rd_cache[rd] = vrf
                 return vrf
         return None
 
@@ -195,6 +199,39 @@ class BGPConfImpl(object):
         if vrf is None:
             return vpnsvc_thrift.BGP_ERR_PARAM
         self.zsock.delnode(vrf)
+        self.rd_cache = {}
+        return 0
+
+    def pushRoute(self, prefix, nexthop, rd, label):
+        rd = qzcclient.encode_rd(rd)
+        vrf = self.find_vrf(rd)
+        if vrf is None:
+            return vpnsvc_thrift.BGP_ERR_PARAM
+
+        ctx = bgp_capnp.AfiKey.new_message()
+        ctx.afi = 1
+
+        rt = bgp_capnp.BGPVRFRoute.new_message()
+        rt.nexthop.val = ipv4_s2v(nexthop)
+        rt.prefix.prefixlen = int(prefix.split('/')[1])
+        rt.prefix.addr = ipv4_s2v(prefix.split('/')[0])
+        rt.label = label
+        self.zsock.setelem(vrf, 3, rt, ctx)
+        return 0
+
+    def withdrawRoute(self, prefix, rd):
+        rd = qzcclient.encode_rd(rd)
+        vrf = self.find_vrf(rd)
+        if vrf is None:
+            return vpnsvc_thrift.BGP_ERR_PARAM
+
+        ctx = bgp_capnp.AfiKey.new_message()
+        ctx.afi = 1
+
+        rt = bgp_capnp.BGPVRFRoute.new_message()
+        rt.prefix.prefixlen = int(prefix.split('/')[1])
+        rt.prefix.addr = ipv4_s2v(prefix.split('/')[0])
+        self.zsock.unsetelem(vrf, 3, rt, ctx)
         return 0
 
     def __getattr__(self, name):

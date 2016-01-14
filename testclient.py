@@ -75,6 +75,12 @@ def run(addr, port):
         client.enableAddressFamily('192.168.1.100',
                 vpnsvc_thrift.af_afi.AFI_IP, vpnsvc_thrift.af_safi.SAFI_MPLS_VPN)
         time.sleep(10)
+        client.pushRoute('10.3.0.0/16', '192.168.1.150', '64603:1111', 200)
+        time.sleep(1)
+        client.pushRoute('10.4.1.0/24', '192.168.1.151', '64603:1111', 200)
+        time.sleep(1)
+        client.withdrawRoute('10.3.0.0/16', '64603:1111')
+        time.sleep(1)
         client.disableAddressFamily('192.168.1.100',
                 vpnsvc_thrift.af_afi.AFI_IP, vpnsvc_thrift.af_safi.SAFI_MPLS_VPN)
         client.deletePeer('192.168.1.100')

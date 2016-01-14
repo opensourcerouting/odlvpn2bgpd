@@ -47,7 +47,6 @@ class NoTimeoutTransport(TBufferedTransportFactory):
 def run(addr, port):
     errs = dict([(v, k) for (k, v) in vpnsvc_thrift.__dict__.items() if k.startswith('BGP_ERR_')])
     client = NonzeroWrap(thriftpy.rpc.make_client(vpnsvc_thrift.BgpConfigurator, addr, port), errs)
-    client.set_reverse(thriftpy.thrift.TProcessor(vpnsvc_thrift.BgpUpdater, BGPUpdImpl()))
 
     try:
         print client.startBgp(64603, '192.168.0.1', 179, 30, 60, 60, False)

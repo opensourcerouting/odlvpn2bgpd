@@ -279,22 +279,8 @@ def run_reverse_int(addr, port):
         if rdy == 0: continue
         raw = zssub.recv()
         upd = bgp_capnp.BGPEventVRFRoute.from_bytes(raw)
-        print repr(upd)
 
-        rdtype = struct.unpack('>H6c', struct.pack('@Q', upd.outboundRd))[0]
-        if rdtype == 0:
-            rdtype, asn, val = struct.unpack('>HHI', struct.pack('@Q', upd.outboundRd))
-            rd = '%d:%d' % (asn, val)
-        elif rdtype == 1:
-            rdtype, ip, val = struct.unpack('>HIH', struct.pack('@Q', upd.outboundRd))
-            rd = '%s:%d' % (socket.inet_ntoa(struct.pack('>I', ip)), val)
-        elif rdtype == 2:
-            rdtype, asn, val = struct.unpack('>HIH', struct.pack('@Q', upd.outboundRd))
-            rd = '%d:%d' % (asn, val)
-        else:
-            rd = '%d:%s' % (rdtype, '.'.join(['%02x' % i for i in
-                struct.unpack('6c', struct.pack('@Q', upd.outboundRd)[2:])]))
-
+        rd = qzcclient.decode_rd(upd.outboundRd)
         prefix = socket.inet_ntoa(struct.pack('>I', upd.prefix.addr))
         prefixlen = upd.prefix.prefixlen
         nexthop = socket.inet_ntoa(struct.pack('>I', upd.nexthop.val))

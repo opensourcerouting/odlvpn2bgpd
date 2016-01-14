@@ -29,6 +29,8 @@ notify_url = 'ipc:///tmp/qzc-notify'
 
 def ipv4_s2v(s):
     return struct.unpack('>I', socket.inet_aton(s))[0]
+def ipv4_v2s(val):
+    return socket.inet_ntoa(struct.pack('>I', val))
 
 class BGPInstance(object):
     def __init__(self):
@@ -41,11 +43,13 @@ class BGPConfImpl(object):
         self.quaggacfg = quaggacfg
         self.bgpdpath = bgpdpath
         self.rd_cache = {}
+        self.iter_reset()
 
     def startBgp(self, asn, rid, port, t_holdtime, t_keepalive, t_stalepath, fbit):
         if self.asn is not None:
             return vpnsvc_thrift.BGP_ERR_ACTIVE
 
+        self.iter_reset()
         self.asn = asn
         self.url = 'ipc:///tmp/qzc-%d' % (asn)
         self.proc = subprocess.Popen(
@@ -93,6 +97,7 @@ class BGPConfImpl(object):
         self.proc.terminate()
         self.proc.wait()
         self.proc = None
+        self.iter_reset()
         return 0
 
     def enableGracefulRestart(self, stalepathTime):
@@ -233,6 +238,54 @@ class BGPConfImpl(object):
         rt.prefix.addr = ipv4_s2v(prefix.split('/')[0])
         self.zsock.unsetelem(vrf, 3, rt, ctx)
         return 0
+
+    def iter_reset(self):
+        self.iter_vrfs = None
+        self.iter_pfx = None
+    def iter_get(self):
+        ctx = bgp_capnp.AfiKey.new_message()
+        ctx.afi = 1
+        data = None
+        prev_vrf = None
+        prev_rd = None
+        while len(self.iter_vrfs) > 0 and data == None:
+            vrf = self.iter_vrfs[0]
+            if vrf != prev_vrf:
+                vrfcfg = self.zsock.getelem(vrf, 1)
+                prev_vrf = vrf
+                prev_rd = vrfcfg.outboundRd
+            data, self.iter_pfx = self.zsock._getelem(vrf, 2, ctx,
+                    self.iter_pfx, wrap = False)
+            if self.iter_pfx is None:
+                self.iter_vrfs.pop(0)
+        return (prev_rd, data)
+    def getRoutes(self, optype, winsize):
+        routes = vpnsvc_thrift.Routes()
+        if optype == vpnsvc_thrift.GET_RTS_INIT:
+            self.iter_reset()
+            self.iter_vrfs = [long(i) for i in
+                    self.zsock.getelem(self.bgp_instance_nid, 3).nodes]
+        else:
+            if self.iter_vrfs is None:
+                routes.errcode = vpnsvc_thrift.ERR_NOT_ITER
+                return routes
+        routes.errcode = 0
+        routes.more = 1
+        routes.updates = []
+        for i in range(0, max(winsize / 96, 1)):
+            rd, route = self.iter_get()
+            if route is None:
+                routes.more = 0
+                break
+            upd = vpnsvc_thrift.Update()
+            upd.type = vpnsvc_thrift.BGP_RT_ADD
+            upd.prefixlen = route.prefix.prefixlen
+            upd.prefix = ipv4_v2s(route.prefix.addr)
+            upd.nexthop = ipv4_v2s(route.nexthop.val)
+            upd.label = route.label
+            upd.rd = qzcclient.decode_rd(rd)
+            routes.updates.append(upd)
+        return routes
 
     def __getattr__(self, name):
         def not_impl(*args, **kwargs):

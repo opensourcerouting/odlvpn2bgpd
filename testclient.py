@@ -81,6 +81,16 @@ def run(addr, port):
         time.sleep(1)
         client.withdrawRoute('10.3.0.0/16', '64603:1111')
         time.sleep(1)
+
+        more = True
+        arg = vpnsvc_thrift.GET_RTS_INIT
+        while more:
+            routes = client.getRoutes(arg, 96 * 2)
+            print repr(routes)
+            more = routes.more > 0
+            arg = vpnsvc_thrift.GET_RTS_NEXT
+
+        time.sleep(1)
         client.disableAddressFamily('192.168.1.100',
                 vpnsvc_thrift.af_afi.AFI_IP, vpnsvc_thrift.af_safi.SAFI_MPLS_VPN)
         client.deletePeer('192.168.1.100')

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import os, sys, argparse, select, subprocess, traceback, struct, socket, signal
-dirn = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+dirn = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(dirn)
 
 import logging, traceback, inspect, time
@@ -13,9 +13,18 @@ import qzcclient
 import qzc_capnp
 import bgp_capnp
 
+# default settings to be modified for package install
+# dirn = full path to this script
+#
+default_bgp_cfg = os.path.join(dirn, 'bgpd.conf')
+default_bgpd = '../quagga/bgpd/bgpd'
+default_thrift = os.path.join(dirn, 'vpnservice.thrift')
+#
+# end default settings
+
 ctx = zmq.Context()
 
-vpnsvc_thrift = thriftpy.load("vpnservice.thrift", module_name="vpnsvc_thrift")
+vpnsvc_thrift = thriftpy.load(default_thrift, module_name="vpnsvc_thrift")
 notify_url = 'ipc:///tmp/qzc-notify'
 
 def ipv4_s2v(s):
@@ -26,10 +35,11 @@ class BGPInstance(object):
         pass
 
 class BGPConfImpl(object):
-    def __init__(self, quaggacfg):
+    def __init__(self, quaggacfg, bgpdpath):
         self.asn = None
         self.proc = None
         self.quaggacfg = quaggacfg
+        self.bgpdpath = bgpdpath
 
     def startBgp(self, asn, rid, port, t_holdtime, t_keepalive, t_stalepath, fbit):
         if self.asn is not None:
@@ -38,10 +48,7 @@ class BGPConfImpl(object):
         self.asn = asn
         self.url = 'ipc:///tmp/qzc-%d' % (asn)
         self.proc = subprocess.Popen(
-            #['libtool','--mode=execute','gdb','-q',
-            #    #'-ex', 'break qcapn_BGP_set',
-            #    '-ex','run','--args'] +
-            ['../quagga/bgpd/bgpd',
+            [self.bgpdpath,
             '-f', self.quaggacfg, '-p', str(port), '-Z', self.url])
 
         try:
@@ -208,10 +215,10 @@ class NoTimeoutTransport(TBufferedTransportFactory):
         client.sock.settimeout(None)
         return super(NoTimeoutTransport, self).get_transport(client)
 
-def run(addr, port, cfgfile):
+def run(addr, port, cfgfile, bgpd):
     server = thriftpy.rpc.make_server(
             vpnsvc_thrift.BgpConfigurator,
-            BGPConfImpl(cfgfile),
+            BGPConfImpl(cfgfile, bgpd),
             addr, port,
             trans_factory = NoTimeoutTransport())
     server.serve()
@@ -279,15 +286,19 @@ if __name__ == '__main__':
     argp.add_argument('--server-port', type = int, default = 7644)
     argp.add_argument('--client-addr', type = str, default = '127.0.0.1')
     argp.add_argument('--client-port', type = int, default = 6644)
-    argp.add_argument('--config', type = str, default = 'bgpd.conf')
+    argp.add_argument('--config', type = str, default = default_bgp_cfg)
+    argp.add_argument('--bgpd', type = str, default = default_bgpd)
     args = argp.parse_args()
+
+    if os.getuid() != 0:
+        sys.stderr.write('WARNING: this script should run as root since it starts bgpd\n')
 
     pid = os.fork()
     if pid == 0:
         run_reverse(args.client_addr, args.client_port)
     else:
         try:
-            run(args.server_addr, args.server_port, args.config)
+            run(args.server_addr, args.server_port, args.config, args.bgpd)
         finally:
             os.kill(pid, signal.SIGTERM)
 

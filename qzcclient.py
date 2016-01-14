@@ -53,7 +53,7 @@ class QZCClient(object):
         logging.info('resolved WKN %016x to nid %016x', wkn, rep.wknresolve.nid)
         return rep.wknresolve.nid
 
-    def getelem(self, nid, elem, ctx = None, wrap = True):
+    def _getelem(self, nid, elem, ctx = None, itr = None, wrap = True):
         req = qzc_capnp.QZCRequest.new_message()
         req.init('get')
         req.get.nid = nid;
@@ -62,6 +62,10 @@ class QZCClient(object):
             ptr = req.get.ctxdata.as_struct(ctx.schema)
             ptr.from_dict(ctx.to_dict())
             req.get.ctxtype = ctx.schema.node.id
+        if itr is not None:
+            ptr = req.get.iterdata.as_struct(itr.schema)
+            ptr.from_dict(itr.to_dict())
+            req.get.itertype = itr.schema.node.id
         rep = self.do(req)
         if rep.error:
             raise ValueError('error getting element %d on nid:%016x' % (elem, nid))
@@ -71,12 +75,34 @@ class QZCClient(object):
             ret = rep.get.data.as_struct(types[rep.get.datatype])
             if wrap:
                 ret = StructWrapper(ret)
+        elif rep.get.datatype == 0:
+            rtype = '<NULL>'
+            ret = None
         else:
             rtype = '<unknown:%016x>' % (rep.get.datatype)
             ret = (rep.get.datatype, rep.get.data)
 
+        if rep.get.itertype == 0:
+            nextiter = None
+        else:
+            nextiter = rep.get.nextiter.as_struct(types[rep.get.itertype])
+
         logging.info('GET nid:%016x/%d => %s', nid, elem, rtype)
-        return ret
+        return (ret, nextiter)
+
+    def getelem(self, *args, **kwargs):
+        return self._getelem(*args, **kwargs)[0]
+
+    def iterelem(self, nid, elem, ctx = None, wrap = True):
+        itr = None
+        while True:
+            previtr = itr
+            data, itr = self._getelem(nid, elem, ctx, itr, wrap)
+            logging.info('iter %r => %r', previtr, itr)
+            if data is not None:
+                yield data
+            if itr is None:
+                break
 
     def setelem(self, nid, elem, msg, ctx = None):
         req = qzc_capnp.QZCRequest.new_message()
@@ -97,6 +123,26 @@ class QZCClient(object):
             raise ValueError('error setting element %d on nid:%016x' % (elem, nid))
 
         logging.info('SET nid:%016x/%d', nid, elem)
+
+    def unsetelem(self, nid, elem, msg, ctx = None):
+        req = qzc_capnp.QZCRequest.new_message()
+        req.init('unset')
+        req.unset.nid = nid;
+        req.unset.elem = elem;
+        if ctx is not None:
+            ptr = req.unset.ctxdata.as_struct(ctx.schema)
+            ptr.from_dict(ctx.to_dict())
+            req.unset.ctxtype = ctx.schema.node.id
+
+        ptr = req.unset.data.as_struct(msg.schema)
+        ptr.from_dict(msg.to_dict())
+        req.unset.datatype = msg.schema.node.id
+
+        rep = self.do(req)
+        if rep.error:
+            raise ValueError('error unsetting element %d on nid:%016x' % (elem, nid))
+
+        logging.info('UNSET nid:%016x/%d', nid, elem)
 
     def createchild(self, nid, elem, msg):
         req = qzc_capnp.QZCRequest.new_message()

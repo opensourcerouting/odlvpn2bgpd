@@ -7,12 +7,18 @@ struct AfiSafiKey {
 	afi			 @0 :UInt8;
 	safi			 @1 :UInt8;
 }
+struct AfiKey {
+	afi			 @0 :UInt8;
+}
 struct ExtCommunityList {
 	values			 @0 :List(UInt64);
 }
 struct PrefixV4 {
 	addr			 @0 :UInt32;
 	prefixlen		 @1 :UInt8;
+}
+struct VRFTableIter {
+	prefix			 @0 :PrefixV4;
 }
 
 struct BGP {
@@ -110,6 +116,13 @@ struct BGPVRF {
 	outboundRd		 @0 :UInt64;
 	rtImport		 @1 :ExtCommunityList;
 	rtExport		 @2 :ExtCommunityList;
+}
+
+struct BGPVRFRoute
+{
+	prefix			 @0 :PrefixV4;
+	nexthop			 @1 :IPv4;
+	label			 @2 :UInt32;
 }
 
 struct BGPEventVRFRoute {

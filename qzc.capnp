@@ -50,6 +50,8 @@ struct QZCGetReq {
 	elem		@1 :UInt64;
 	ctxtype		@2 :UInt64;
 	ctxdata		@3 :AnyPointer;
+	itertype	@4 :UInt64;
+	iterdata	@5 :AnyPointer;
 }
 
 struct QZCGetRep {
@@ -57,6 +59,8 @@ struct QZCGetRep {
 	elem		@1 :UInt64;
 	datatype	@2 :UInt64;
 	data		@3 :AnyPointer;
+	itertype	@4 :UInt64;
+	nextiter	@5 :AnyPointer;
 }
 
 # create child in context of a parent node/element
@@ -94,6 +98,7 @@ struct QZCRequest {
 		create		@4 :QZCCreateReq;
 		set		@5 :QZCSetReq;
 		del		@6 :QZCDelReq;
+		unset		@7 :QZCSetReq;
 	}
 }
 
@@ -108,6 +113,7 @@ struct QZCReply {
 		create		@5 :QZCCreateRep;
 		set		@6 :Void;
 		del		@7 :Void;
+		unset		@8 :Void;
 	}
 }
 

@@ -25,7 +25,7 @@ default_thrift = os.path.join(dirn, 'vpnservice.thrift')
 ctx = zmq.Context()
 
 vpnsvc_thrift = thriftpy.load(default_thrift, module_name="vpnsvc_thrift")
-notify_url = 'ipc:///tmp/qzc-notify'
+notify_url = '/tmp/qzc-notify'
 
 def ipv4_s2v(s):
     return struct.unpack('>I', socket.inet_aton(s))[0]
@@ -326,28 +326,39 @@ def run_reverse_int(addr, port):
             return
         raise
 
+    try:
+        os.unlink(notify_url)
+    except:
+        pass
+
     client.onStartConfigResyncNotification()
 
-    zssub = ctx.socket(zmq.SUB)
-    zssub.connect(notify_url)
-    zssub.setsockopt(zmq.SUBSCRIBE, '')
-
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET, 0)
+    listener.bind(notify_url)
+    os.chmod(notify_url, 0777)
+    listener.listen(1)
     while True:
-        rdy = zssub.poll(timeout = -1)
-        if rdy == 0: continue
-        raw = zssub.recv()
-        upd = bgp_capnp.BGPEventVRFRoute.from_bytes(raw)
+        zssub = listener.accept()[0]
+        logging.info('notify socket received connection')
 
-        rd = qzcclient.decode_rd(upd.outboundRd)
-        prefix = socket.inet_ntoa(struct.pack('>I', upd.prefix.addr))
-        prefixlen = upd.prefix.prefixlen
-        nexthop = socket.inet_ntoa(struct.pack('>I', upd.nexthop.val))
-        label = upd.label
+        while True:
+            raw = zssub.recv(8192)
+            if raw == '':
+                zssub.close()
+                break
 
-        if upd.announce:
-            client.onUpdatePushRoute(rd, prefix, prefixlen, nexthop, label)
-        else:
-            client.onUpdateWithdrawRoute(rd, prefix, prefixlen)
+            upd = bgp_capnp.BGPEventVRFRoute.from_bytes(raw)
+
+            rd = qzcclient.decode_rd(upd.outboundRd)
+            prefix = socket.inet_ntoa(struct.pack('>I', upd.prefix.addr))
+            prefixlen = upd.prefix.prefixlen
+            nexthop = socket.inet_ntoa(struct.pack('>I', upd.nexthop.val))
+            label = upd.label
+
+            if upd.announce:
+                client.onUpdatePushRoute(rd, prefix, prefixlen, nexthop, label)
+            else:
+                client.onUpdateWithdrawRoute(rd, prefix, prefixlen)
 
 def run_reverse(addr, port):
     while True:
@@ -379,6 +390,7 @@ if __name__ == '__main__':
         run_reverse(args.client_addr, args.client_port)
     else:
         try:
+            time.sleep(0.25)
             run(args.server_addr, args.server_port, args.config, args.bgpd)
         finally:
             os.kill(pid, signal.SIGTERM)

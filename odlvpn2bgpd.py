@@ -1,13 +1,16 @@
 #!/usr/bin/env python
 
-import os, sys, argparse, select, subprocess, traceback, struct, socket, signal
+import os, sys, argparse, select, subprocess, traceback, struct, socket, signal, errno
+from io import BytesIO
 dirn = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(dirn)
 
 import logging, traceback, inspect, time
 import zmq, capnp
 import thriftpy, thriftpy.rpc
-from thriftpy.transport import TBufferedTransportFactory, TTransportException
+from thriftpy.transport import TBufferedTransportFactory, TTransportBase, TTransportException
+from thriftpy.protocol.binary import TBinaryProtocol
+from thriftpy.thrift import TClient
 
 import qzcclient
 import qzc_capnp
@@ -318,13 +321,57 @@ def run(addr, port, cfgfile, bgpd):
             trans_factory = NoTimeoutTransport())
     server.serve()
 
+class DeferTransport(object):
+    def __init__(self, trans, *args, **kwargs):
+        self.trans = trans
+        self.wbuf = bytearray()
+
+        self.lastbuf = None
+        self.nextstatus = time.time() + 1
+
+    def flush(self):
+        pass
+    def write(self, buf):
+        self.wbuf.extend(bytes(buf))
+
+    def run(self, othersock):
+        self.trans.setblocking(False)
+        while True:
+            p = select.poll()
+            if len(self.wbuf) > 0:
+                p.register(self.trans, select.POLLOUT)
+            p.register(othersock, select.POLLIN)
+
+            if time.time() >= self.nextstatus:
+                bufsz = len(self.wbuf)
+                if bufsz != self.lastbuf:
+                    logging.warning('current Thrift backlog: %d bytes' % (bufsz))
+                self.lastbuf = bufsz
+                self.nextstatus = time.time() + 1
+
+            maxwt = max(0, (self.nextstatus - time.time()) * 1000)
+            event = p.poll(maxwt)
+
+            for fd, ev in event:
+                if fd == self.trans.fileno():
+                    nwrite = self.trans.send(self.wbuf[:8192])
+                    if nwrite > 0:
+                        self.wbuf = self.wbuf[nwrite:]
+                if fd == othersock.fileno():
+                    return
+
 def run_reverse_int(addr, port):
+    clientsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
     try:
-        client = thriftpy.rpc.make_client(vpnsvc_thrift.BgpUpdater, addr, port)
-    except TTransportException, e:
-        if e.message.startswith('Could not connect'):
+        clientsock.connect((addr, port))
+    except IOError, e:
+        if e.errno == errno.ECONNREFUSED:
             return
         raise
+
+    transp = DeferTransport(clientsock)
+    proto = TBinaryProtocol(transp)
+    client = TClient(vpnsvc_thrift.BgpUpdater, proto)
 
     try:
         os.unlink(notify_url)
@@ -342,6 +389,7 @@ def run_reverse_int(addr, port):
         logging.info('notify socket received connection')
 
         while True:
+            transp.run(zssub)
             raw = zssub.recv(8192)
             if raw == '':
                 zssub.close()

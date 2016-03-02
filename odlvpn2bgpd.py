@@ -129,6 +129,11 @@ class BGPConfImpl(object):
         newnid = self.zsock.createchild(self.bgp_instance_nid, 2, newconf)
         if newnid == 0:
             return vpnsvc_thrift.BGP_ERR_FAILED
+
+        self.aficfg(ip,
+                vpnsvc_thrift.af_afi.AFI_IP,
+                vpnsvc_thrift.af_safi.SAFI_MPLS_VPN,
+                True)
         return 0
 
     def deletePeer(self, ip):

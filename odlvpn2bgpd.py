@@ -318,13 +318,28 @@ def run(addr, port, cfgfile, bgpd):
             trans_factory = NoTimeoutTransport())
     server.serve()
 
+class IntrospectionTransport(TBufferedTransportFactory):
+    def __init__(self, *args, **kwargs):
+        self.client = None
+        super(IntrospectionTransport, self).__init__(*args, **kwargs)
+
+    def get_transport(self, client):
+        if self.client is not None:
+            raise RuntimeError("IntrospectionTransport can only be used once")
+        self.client = client
+        return super(IntrospectionTransport, self).get_transport(client)
+
 def run_reverse_int(addr, port):
+    transport = IntrospectionTransport()
     try:
-        client = thriftpy.rpc.make_client(vpnsvc_thrift.BgpUpdater, addr, port)
+        client = thriftpy.rpc.make_client(vpnsvc_thrift.BgpUpdater, addr, port,
+                                          trans_factory = transport)
     except TTransportException, e:
         if e.message.startswith('Could not connect'):
             return
         raise
+
+    thsock = transport.client.sock
 
     client.onStartConfigResyncNotification()
 
@@ -332,9 +347,23 @@ def run_reverse_int(addr, port):
     zssub.connect(notify_url)
     zssub.setsockopt(zmq.SUBSCRIBE, '')
 
+    poller = zmq.Poller()
+    poller.register(zssub, zmq.POLLIN)
+    poller.register(thsock, zmq.POLLIN)
+
     while True:
-        rdy = zssub.poll(timeout = -1)
-        if rdy == 0: continue
+        events = dict(poller.poll())
+        if events == {}:
+            continue
+        if thsock.fileno() in events and events[thsock.fileno()] == zmq.POLLIN:
+            buf = thsock.recv(1024)
+            if not buf:
+                sys.stderr.write('client closed connection\n')
+                zssub.close()
+                return
+        if zssub not in events or events[zssub] != zmq.POLLIN:
+            continue
+
         raw = zssub.recv()
         upd = bgp_capnp.BGPEventVRFRoute.from_bytes(raw)
 

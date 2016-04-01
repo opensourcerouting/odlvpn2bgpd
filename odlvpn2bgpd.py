@@ -17,7 +17,7 @@ import bgp_capnp
 # dirn = full path to this script
 #
 default_bgp_cfg = os.path.join(dirn, 'bgpd.conf')
-default_bgpd = '../quagga/bgpd/bgpd'
+default_bgpd = '/usr/lib/quagga/bgpd'
 default_thrift = os.path.join(dirn, 'vpnservice.thrift')
 #
 # end default settings
@@ -272,7 +272,7 @@ class BGPConfImpl(object):
                     self.zsock.getelem(self.bgp_instance_nid, 3).nodes]
         else:
             if self.iter_vrfs is None:
-                routes.errcode = vpnsvc_thrift.ERR_NOT_ITER
+                routes.errcode = vpnsvc_thrift.BGP_ERR_NOT_ITER
                 return routes
         routes.errcode = 0
         routes.more = 1
@@ -316,7 +316,11 @@ def run(addr, port, cfgfile, bgpd):
             BGPConfImpl(cfgfile, bgpd),
             addr, port,
             trans_factory = NoTimeoutTransport())
-    server.serve()
+    while True:
+        try:
+            server.serve()
+        except Exception:
+            sys.excepthook(*sys.exc_info())
 
 class IntrospectionTransport(TBufferedTransportFactory):
     def __init__(self, *args, **kwargs):

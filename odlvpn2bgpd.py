@@ -333,7 +333,10 @@ class IntrospectionTransport(TBufferedTransportFactory):
         self.client = client
         return super(IntrospectionTransport, self).get_transport(client)
 
+just_started = True
+
 def run_reverse_int(addr, port):
+    global just_started
     transport = IntrospectionTransport()
     try:
         client = thriftpy.rpc.make_client(vpnsvc_thrift.BgpUpdater, addr, port,
@@ -345,7 +348,9 @@ def run_reverse_int(addr, port):
 
     thsock = transport.client.sock
 
-    client.onStartConfigResyncNotification()
+    if just_started:
+        client.onStartConfigResyncNotification()
+        just_started = False
 
     zssub = ctx.socket(zmq.SUB)
     zssub.connect(notify_url)
@@ -383,6 +388,8 @@ def run_reverse_int(addr, port):
             client.onUpdateWithdrawRoute(rd, prefix, prefixlen)
 
 def run_reverse(addr, port):
+    global just_started
+    just_started = True
     while True:
         try:
             run_reverse_int(addr, port)

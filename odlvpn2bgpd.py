@@ -345,6 +345,8 @@ def run_reverse_int(addr, port):
 
     thsock = transport.client.sock
 
+    client.onStartConfigResyncNotification()
+
     zssub = ctx.socket(zmq.SUB)
     zssub.connect(notify_url)
     zssub.setsockopt(zmq.SUBSCRIBE, '')
@@ -375,9 +377,7 @@ def run_reverse_int(addr, port):
         nexthop = socket.inet_ntoa(struct.pack('>I', upd.nexthop.val))
         label = upd.label
 
-        if upd.announce and nexthop == '255.255.255.255':
-            client.onStartConfigResyncNotification()
-        elif upd.announce:
+        if upd.announce:
             client.onUpdatePushRoute(rd, prefix, prefixlen, nexthop, label)
         else:
             client.onUpdateWithdrawRoute(rd, prefix, prefixlen)
